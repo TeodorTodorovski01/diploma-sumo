@@ -1,0 +1,13 @@
+<configuration>
+  <input>
+    <net-file value="net.net.xml"/>
+    <route-files value="routes.rou.xml,amb.rou.xml"/>
+  </input>
+  <time>
+    <begin value="0"/>
+    <end value="1800"/>
+  </time>
+  <output>
+    <tripinfo-output value="tripinfo.xml"/>
+  </output>
+</configuration>
