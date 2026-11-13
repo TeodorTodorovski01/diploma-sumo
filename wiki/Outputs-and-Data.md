@@ -19,7 +19,7 @@ Generated files include:
 | `passenger.rou.xml` | Validated passenger vehicles and routes used in the run. |
 | `ambulance.rou.xml` | Generated emergency ambulance vehicle/route on Skopje maps. Central-area runs use the tracked preconfigured `centar/amb.rou.xml`. |
 | `tripinfo.xml` | SUMO trip-level departure, arrival, duration, and related information. |
-| `ambulance-route-N.pdf` | Network map with the ambulance's recorded traversed roads highlighted in red and run/search parameters. `N` increments to avoid overwriting. |
+| `ambulance-route-N.pdf` | Two network heat maps for peak sampled road occupancy and summed vehicle waiting time, with the ambulance's traversed route in green and run/search parameters. `N` increments to avoid overwriting. |
 | `runtime-comparison.pdf` | Whole-run and ambulance trip-time comparison produced by `--compare-time`. |
 | `training-report.pdf` | Training objective plot and parameter summary. |
 | `training-results.csv` | Tabular row per training evaluation. |

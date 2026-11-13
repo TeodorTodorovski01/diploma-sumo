@@ -34,13 +34,22 @@ parsing and `traci.start()` happen before these definitions are reached.
 | `set_normal_signal_cycles(green_seconds, red_seconds)` | For every traffic light, scales green-only phases to fit the requested total cycle while preserving yellow and other fixed phase durations. Raises if the active program cannot fit that cycle. |
 | `green_phase(tls, link)` | Finds and caches the first signal phase that provides a green state for a traffic-light link. Returns `None` if no phase is found. |
 | `preempt(t)` | Checks the ambulance's next traffic lights within 120 m; requests the applicable green phase or extends an about-to-end green for five seconds. |
-| `run_once()` | Executes one simulation, tracks traversed ambulance edges, collects trip measurements, periodically replans, performs optional signal priority, and writes a route PDF if the ambulance traveled over recorded roads. |
+| `run_once()` | Executes one simulation, samples city-wide edge occupancy/waiting metrics, tracks traversed ambulance edges, collects trip measurements, periodically replans, performs optional signal priority, and writes a route PDF if the ambulance traveled over recorded roads. |
 
 Notable controller constants: `AMB` is the fixed vehicle ID `amb0`;
 `DIST` is the 120 m signal lookahead; `AMBULANCE_SPEED_FACTOR` is `1.3` and
 is used when estimating the maximum speed for A*; `REPLAN`,
 `TLS_PENALTY`, `SEARCH_ALGORITHM`, and `ASTAR_HEURISTIC_WEIGHT` come from
-parsed CLI options and/or search defaults.
+parsed CLI options and/or search defaults. Smart City traffic metrics are
+sampled no more frequently than every 30 simulation seconds (or the configured
+replan interval, when larger).
+
+## `centar/smart_city.py`
+
+| Name | What it does |
+|---|---|
+| `EdgeTrafficMetric` | Type alias for `(peak_occupancy_percent, peak_summed_waiting_seconds)`. |
+| `collect_smart_city_metrics(edge_ids, previous, get_occupancy, get_waiting_time) -> dict[str, EdgeTrafficMetric]` | Samples occupancy and summed waiting time for currently occupied edges, retaining independent per-edge peaks across snapshots. Returns a new mapping without modifying the previous mapping. |
 
 ## `centar/training.py`
 
@@ -76,9 +85,8 @@ traffic-light penalty, and A* heuristic weight. The module's main guard calls
 
 | Function or constant | What it does |
 |---|---|
-| `AXES_HEIGHT` | Height fraction used for the map axes on the route PDF. |
 | `TABLE_MAX_PAGE_HEIGHT` | Maximum page-height fraction reserved for the route's settings table. |
-| `write_route_pdf(net, traversed_edge_ids, output_path, map_name, parameters) -> Path` | Draws all drawable network edges in gray and recorded ambulance edges in red; adds a settings table, title, and attribution. Adds an incrementing numeric suffix to avoid overwriting a previous route PDF. Raises `ValueError` if no route segment can be drawn. |
+| `write_route_pdf(net, traversed_edge_ids, output_path, map_name, parameters, traffic_metrics=None) -> Path` | Draws peak occupancy and waiting-time heat maps, overlays recorded ambulance edges in green, and adds a settings table, title, and attribution. Adds an incrementing numeric suffix to avoid overwriting a previous route PDF. Raises `ValueError` if no route segment can be drawn. |
 | `write_runtime_comparison_pdf(output_path, elapsed_by_map, ambulance_trip_times, scenario) -> Path` | Creates the comparison table for full Skopje and Skopje Lite wall times, trip times, saved time/percentage, scenario summary, and report timestamp. |
 
 ## `centar/make_amb.py`
@@ -91,11 +99,12 @@ selected source/destination and approximate length. The regular
 `scenario.py` uses its own `generate_ambulance_route()` for generated Skopje
 routes.
 
-## `tests/test_training.py`
+## Tests
 
-`TrainingBestPersistenceTests.test_checkpoint_round_trip_and_scenario_validation`
-checks valid checkpoint round-tripping and rejects a different profile.
-`test_later_run_keeps_and_resumes_previous_best` checks that matching profile
-runs resume the previous best, retain it when a later run is worse, and replace
-it when a better trip is observed. Run the tests with
+`tests/test_smart_city.py` checks peak metric accumulation and creates a route
+PDF with heat-map data. `tests/test_training.py` checks training checkpoint
+round-tripping, profile validation, resuming, retaining, and improving the
+best result.
+
+Run the tests with
 `python -m unittest discover -s tests -v`.

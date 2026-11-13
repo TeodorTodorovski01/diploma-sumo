@@ -20,7 +20,8 @@ trip times.
   setting their target cycle duration.
 - Optionally add one temporary stopped passenger vehicle as a road blockage.
 - Save trip information, generated routes, a PDF of the roads the ambulance
-  actually traveled, and optional map runtime comparisons.
+  actually traveled in green, peak traffic occupancy and waiting-time heat
+  maps, and optional map runtime comparisons.
 - Use SPSA training to tune route-search parameters and optionally apply the
   best completed result as the defaults for later runs.
 
@@ -122,6 +123,7 @@ centar/
   scenario.py             Scenario CLI, traffic generation, and launcher
   control.py              TraCI controller, route replanning, signal handling
   training.py             SPSA optimizer and evaluation reports
+  smart_city.py           Per-road occupancy/waiting metric aggregation
   search_defaults.py      Validated search-defaults load/save helpers
   search_defaults.json    Shared default route-search settings
   route_pdf.py             Route and runtime-comparison PDF generation
@@ -137,6 +139,7 @@ skopje/
   *.sumocfg                 SUMO configurations
 tests/
   test_training.py         Focused training-checkpoint tests
+  test_smart_city.py       Traffic metric and heat-map PDF tests
 wiki/                       Detailed project documentation
 ```
 

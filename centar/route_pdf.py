@@ -4,10 +4,87 @@ from typing import Mapping, Sequence
 
 from matplotlib.backends.backend_pdf import FigureCanvasPdf
 from matplotlib.collections import LineCollection
+from matplotlib.colors import Normalize
 from matplotlib.figure import Figure
+from smart_city import EdgeTrafficMetric
 
-AXES_HEIGHT = 0.86
 TABLE_MAX_PAGE_HEIGHT = 0.16
+
+
+def _draw_traffic_panel(
+    figure: Figure,
+    axes,
+    road_shapes,
+    edge_shapes,
+    route_shapes,
+    traffic_metrics: Mapping[str, EdgeTrafficMetric],
+    metric_index: int,
+    colorbar_label: str,
+) -> None:
+    axes.add_collection(LineCollection(
+        road_shapes,
+        colors="#d0d5dd",
+        linewidths=0.35,
+        zorder=1,
+    ))
+
+    measured_shapes = []
+    measured_values = []
+    for edge_id, values in traffic_metrics.items():
+        shape = edge_shapes.get(edge_id)
+        value = values[metric_index]
+        if shape is not None and len(shape) >= 2 and value > 0:
+            measured_shapes.append(shape)
+            measured_values.append(value)
+
+    maximum = max(measured_values, default=0.0)
+    if maximum > 0:
+        heatmap = LineCollection(
+            measured_shapes,
+            cmap="YlOrRd",
+            norm=Normalize(vmin=0.0, vmax=maximum),
+            linewidths=1.1,
+            zorder=2,
+        )
+        heatmap.set_array(measured_values)
+        axes.add_collection(heatmap)
+        colorbar = figure.colorbar(
+            heatmap,
+            ax=axes,
+            orientation="vertical",
+            fraction=0.045,
+            pad=0.02,
+        )
+        colorbar.set_label(colorbar_label, fontsize=8)
+        colorbar.ax.tick_params(labelsize=7)
+    else:
+        axes.text(
+            0.5,
+            0.5,
+            "No non-zero traffic samples",
+            transform=axes.transAxes,
+            ha="center",
+            va="center",
+            fontsize=10,
+            color="#475467",
+        )
+
+    axes.add_collection(LineCollection(
+        route_shapes,
+        colors="#064e3b",
+        linewidths=3.4,
+        zorder=3,
+    ))
+    axes.add_collection(LineCollection(
+        route_shapes,
+        colors="#00a651",
+        linewidths=2.2,
+        zorder=4,
+    ))
+    axes.autoscale()
+    axes.set_aspect("equal", adjustable="datalim")
+    axes.margins(0.015)
+    axes.set_axis_off()
 
 
 def write_route_pdf(
@@ -16,6 +93,7 @@ def write_route_pdf(
     output_path: Path,
     map_name: str,
     parameters: Mapping[str, str],
+    traffic_metrics: Mapping[str, EdgeTrafficMetric] | None = None,
 ) -> Path:
     all_edges = net.getEdges()
     edge_shapes = {edge.getID(): edge.getShape() for edge in all_edges}
@@ -43,23 +121,46 @@ def write_route_pdf(
 
     figure = Figure(figsize=(16, 11), facecolor="white")
     FigureCanvasPdf(figure)
-    axes = figure.add_axes((0.025, 0.075, 0.95, AXES_HEIGHT))
-    axes.add_collection(LineCollection(
+    metrics = traffic_metrics or {}
+    left_axes = figure.add_axes((0.025, 0.28, 0.455, 0.64))
+    right_axes = figure.add_axes((0.515, 0.28, 0.455, 0.64))
+    _draw_traffic_panel(
+        figure,
+        left_axes,
         road_shapes,
-        colors="#cbd2d9",
-        linewidths=0.45,
-        zorder=1,
-    ))
-    axes.add_collection(LineCollection(
+        edge_shapes,
         route_shapes,
-        colors="#e31a1c",
-        linewidths=2.2,
-        zorder=2,
-    ))
-    axes.autoscale()
-    axes.set_aspect("equal", adjustable="datalim")
-    axes.margins(0.015)
-    axes.set_axis_off()
+        metrics,
+        0,
+        "Occupancy (%)",
+    )
+    _draw_traffic_panel(
+        figure,
+        right_axes,
+        road_shapes,
+        edge_shapes,
+        route_shapes,
+        metrics,
+        1,
+        "Summed waiting time (s)",
+    )
+    figure.text(
+        0.25,
+        0.935,
+        "Peak sampled road occupancy",
+        ha="center",
+        fontsize=12,
+        fontweight="bold",
+    )
+    figure.text(
+        0.75,
+        0.935,
+        "Peak sampled edge waiting time",
+        ha="center",
+        fontsize=12,
+        fontweight="bold",
+    )
+
     parameter_items = list(parameters.items())
     split_index = (len(parameter_items) + 1) // 2
     left_items = parameter_items[:split_index]
@@ -71,11 +172,13 @@ def write_route_pdf(
         ]
         for index, left_item in enumerate(left_items)
     ]
-    table = axes.table(
+    table_axes = figure.add_axes((0.025, 0.045, 0.95, TABLE_MAX_PAGE_HEIGHT))
+    table_axes.set_axis_off()
+    table = table_axes.table(
         cellText=table_rows,
         colLabels=("Setting", "Value", "Setting", "Value"),
         colWidths=(0.25, 0.25, 0.25, 0.25),
-        bbox=(0.49, 0, 0.49, TABLE_MAX_PAGE_HEIGHT / AXES_HEIGHT),
+        bbox=(0, 0, 1, 1),
     )
     table.auto_set_font_size(False)
     table.set_fontsize(6)
@@ -88,18 +191,19 @@ def write_route_pdf(
             cell.get_text().set_fontweight("bold")
 
     figure.suptitle(
-        f"Ambulance route taken - {map_name}",
+        f"Smart City traffic and ambulance route - {map_name}",
         fontsize=18,
         fontweight="bold",
-        y=0.975,
+        y=0.985,
     )
     figure.text(
         0.5,
-        0.035,
-        f"Red: roads traversed ({len(traversed_edge_ids)} recorded segments)  |  "
+        0.018,
+        f"Green: ambulance route ({len(traversed_edge_ids)} recorded segments)  |  "
+        "Heat maps show peak sampled traffic occupancy and waiting  |  "
         "Map data (c) OpenStreetMap contributors",
         ha="center",
-        fontsize=9,
+        fontsize=8,
         color="#475467",
     )
     figure.savefig(numbered_path, format="pdf")

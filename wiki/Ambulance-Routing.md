@@ -100,8 +100,28 @@ controller automatically.
 
 ## Route PDF measurements
 
-The route map highlights recorded ambulance road segments in red. The
-parameter table includes the search settings, simulation wall time, measured
-ambulance trip duration (or an incomplete/not-started status), and the
-initial Dijkstra ETA when available. That ETA is an estimate based on initial
-edge costs, not the eventual observed trip duration.
+The route PDF contains two heat-map panels: peak sampled road occupancy
+(percent) and peak summed vehicle waiting time on each road (seconds). Roads
+with no observed congestion remain gray; higher sampled values use warmer
+colors. The ambulance's actually traversed roads are overlaid in green on
+both panels.
+
+The Smart City sampler collects occupancy and SUMO's sum of current vehicle
+waiting times on emergency-accessible roads that have vehicles at the
+sampling instant. Empty roads remain gray. It takes an initial sample and
+then samples at intervals of at least 30 simulation seconds; if
+`--replan-interval` is greater than 30 seconds, it uses that longer interval.
+The heat maps show the per-road peak across those snapshots, so the two panels'
+peaks may have occurred at different times. This is a sampled peak view, not
+a live animation or a time-indexed history.
+
+Traffic-aware routing itself already uses SUMO's current edge travel-time
+estimates and replans at `--replan-interval`; this feature adds explicit
+occupancy/waiting measurements and their visualization, rather than adding an
+arbitrary extra congestion penalty to route costs.
+
+The parameter table includes the search settings, sample count, overall peak
+occupancy and waiting measurements, simulation wall time, measured ambulance
+trip duration (or an incomplete/not-started status), and the initial Dijkstra
+ETA when available. That ETA is an estimate based on initial edge costs, not
+the eventual observed trip duration.

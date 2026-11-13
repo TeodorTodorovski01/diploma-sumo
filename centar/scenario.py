@@ -562,6 +562,7 @@ def main() -> None:
     config_file = map_dir / config_name
     random_trips = tools_dir / "randomTrips.py"
     period = options.duration / options.vehicles
+    passenger_generation_end = options.duration - period / 2
 
     subprocess.run([
         sys.executable, str(random_trips),
@@ -570,7 +571,7 @@ def main() -> None:
         "-r", str(routes_file),
         "-s", str(options.seed),
         "-b", "0",
-        "-e", str(options.duration),
+        "-e", str(passenger_generation_end),
         "-p", str(period),
         "--vehicle-class", "passenger",
         "--validate",

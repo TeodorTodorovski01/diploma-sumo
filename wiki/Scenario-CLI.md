@@ -90,8 +90,11 @@ generation), along with simulation-time ambulance durations when completed.
 ## How passenger trips and blockages are made
 
 The passenger generation interval is `duration / vehicles`; generated trips
-are validated and distributed from time zero to the requested duration.
-`randomTrips.py` receives the chosen seed and passenger vehicle class.
+are validated and distributed from time zero through the requested duration.
+The generation cutoff is buffered by half an interval so floating-point
+rounding cannot add an extra departure at the end. The simulation still runs
+to the full requested duration. `randomTrips.py` receives the chosen seed and
+passenger vehicle class.
 
 When the seeded probability draw passes, the script chooses a qualifying
 passenger vehicle that departs before the ambulance. It finds a lane in that

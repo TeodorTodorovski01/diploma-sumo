@@ -9,6 +9,7 @@ import sumolib
 import networkx as nx
 from route_pdf import write_route_pdf
 from search_defaults import load_search_defaults
+from smart_city import EdgeTrafficMetric, collect_smart_city_metrics
 
 # GUI runs use normal signal cycles by default; --preempt opts in to ambulance priority.
 search_defaults = load_search_defaults()
@@ -83,6 +84,7 @@ RED_SECONDS = options.red_seconds
 SEARCH_ALGORITHM = options.search_algorithm
 ASTAR_HEURISTIC_WEIGHT = options.astar_heuristic_weight
 AMBULANCE_SPEED_FACTOR = 1.3
+SMART_CITY_SAMPLE_INTERVAL = 30.0
 
 tag = ("own" if OWN_ROUTE else "sumo") + \
     ("_preempt" if PREEMPT else "_nopreempt")
@@ -236,12 +238,29 @@ def run_once():
     optimal_estimated_seconds = None
     last_plan, tracking = -1e9, False
     traversed_edges = []
+    traffic_metrics: dict[str, EdgeTrafficMetric] = {}
+    traffic_sample_count = 0
+    last_traffic_sample = -SMART_CITY_SAMPLE_INTERVAL
     # Advance SUMO one step at a time so routes and signals can be adjusted live.
     while (traci.simulation.getMinExpectedNumber() > 0
            and (options.end_time is None
                 or traci.simulation.getTime() < options.end_time)):
         traci.simulationStep()
         t = traci.simulation.getTime()
+        if t - last_traffic_sample >= max(SMART_CITY_SAMPLE_INTERVAL, REPLAN):
+            active_edge_ids = set()
+            for vehicle_id in traci.vehicle.getIDList():
+                edge_id = traci.vehicle.getRoadID(vehicle_id)
+                if edge_id in EDGES:
+                    active_edge_ids.add(edge_id)
+            traffic_metrics = collect_smart_city_metrics(
+                active_edge_ids,
+                traffic_metrics,
+                traci.edge.getLastStepOccupancy,
+                traci.edge.getWaitingTime,
+            )
+            traffic_sample_count += 1
+            last_traffic_sample = t
         if AMB in traci.vehicle.getIDList():
             road_id = traci.vehicle.getRoadID(AMB)
             if road_id in EDGES and (
@@ -325,6 +344,13 @@ def run_once():
             "Traffic-light penalty": f"{TLS_PENALTY:g} s",
             "A* heuristic weight": f"{ASTAR_HEURISTIC_WEIGHT:g}",
             "Recorded road segments": str(len(traversed_edges)),
+            "SmartCity traffic samples": str(traffic_sample_count),
+            "Peak road occupancy": (
+                f"{max((value[0] for value in traffic_metrics.values()), default=0.0):.1f}%"
+            ),
+            "Peak summed edge waiting": (
+                f"{max((value[1] for value in traffic_metrics.values()), default=0.0):.1f} s"
+            ),
             "Simulation wall time": f"{time.perf_counter() - run_started_at:.2f} s",
             "Measured ambulance trip": measured_trip,
             "Initial Dijkstra-optimal ETA": (
@@ -339,6 +365,7 @@ def run_once():
             Path(options.route_pdf),
             MAP_NAME,
             pdf_parameters,
+            traffic_metrics=traffic_metrics,
         )
         print(f"Ambulance route PDF: {pdf_path.resolve()}")
     else:
