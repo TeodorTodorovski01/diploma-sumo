@@ -6,11 +6,14 @@ Example:
 
 import argparse
 import importlib.util
+import json
+import math
 import os
 import random
 import shutil
 import subprocess
 import sys
+import time
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -83,7 +86,8 @@ def add_random_blockage(
         None,
     )
     if ambulance is None:
-        raise RuntimeError(f"Could not find ambulance 'amb0' in {ambulance_file}")
+        raise RuntimeError(
+            f"Could not find ambulance 'amb0' in {ambulance_file}")
     ambulance_depart = float(ambulance.get("depart", "0"))
     candidates = []
 
@@ -111,7 +115,8 @@ def add_random_blockage(
                 break
 
     if not candidates:
-        raise RuntimeError("Could not find a passenger vehicle route suitable for a blockage.")
+        raise RuntimeError(
+            "Could not find a passenger vehicle route suitable for a blockage.")
 
     latest_depart = max(depart for _, _, depart in candidates)
     latest_vehicles = [
@@ -251,7 +256,8 @@ def generate_ambulance_route(
     ET.SubElement(vehicle, "route", {
         "edges": " ".join(edge.getID() for edge in path),
     })
-    ET.ElementTree(routes).write(route_file, encoding="UTF-8", xml_declaration=True)
+    ET.ElementTree(routes).write(
+        route_file, encoding="UTF-8", xml_declaration=True)
     return source_id, destination_id, len(path)
 
 
@@ -260,7 +266,7 @@ def parse_args() -> argparse.Namespace:
         description="Generate passenger traffic and run a configurable SUMO scenario."
     )
     parser.add_argument(
-        "--map", choices=("centar", "skopje"), default="centar",
+        "--map", choices=("centar", "skopje", "skopjelite"), default="centar",
         help="road network to simulate (default: centar)",
     )
     parser.add_argument("--vehicles", type=int, default=1200,
@@ -307,8 +313,31 @@ def parse_args() -> argparse.Namespace:
         "--red-seconds", type=float, default=25,
         help="contribution to target full-cycle duration; yellow is preserved (default: 25)",
     )
+    parser.add_argument(
+        "--search-algorithm",
+        choices=("dijkstra", "astar"),
+        default="dijkstra",
+        help="route search algorithm (default: dijkstra)",
+    )
+    parser.add_argument(
+        "--replan-interval", type=float, default=30,
+        help="recompute the ambulance route every N seconds (default: 30)",
+    )
+    parser.add_argument(
+        "--traffic-light-penalty", type=float,
+        help="extra route cost in seconds per traffic light (default: 0 with priority, otherwise 15)",
+    )
+    parser.add_argument(
+        "--astar-heuristic-weight", type=float, default=1.0,
+        help="A* heuristic multiplier; values above 1 may trade optimality for speed (default: 1)",
+    )
     parser.add_argument("--output-dir", default="scenario-output",
                         help="directory for generated scenario files")
+    parser.add_argument(
+        "--compare-time",
+        action="store_true",
+        help="run the same headless scenario on Skopje and Skopje Lite and compare total wall time",
+    )
     parser.add_argument("--gui", action="store_true",
                         help="show the simulation in SUMO-GUI")
     signal_group = parser.add_mutually_exclusive_group()
@@ -332,7 +361,8 @@ def parse_args() -> argparse.Namespace:
         or options.ambulance_to_coordinates is not None
     )
     if (options.ambulance_from is None) != (options.ambulance_to is None):
-        parser.error("--ambulance-from and --ambulance-to must be provided together")
+        parser.error(
+            "--ambulance-from and --ambulance-to must be provided together")
     if (
         options.ambulance_from_coordinates is None
     ) != (
@@ -346,24 +376,133 @@ def parse_args() -> argparse.Namespace:
         parser.error(
             "Use either ambulance edge IDs or coordinate pairs, not both"
         )
-    if options.map != "skopje" and (
+    if options.map == "centar" and (
         edge_options_set or coordinate_options_set or options.ambulance_depart != 300
     ):
         parser.error(
             "Ambulance start/destination options and --ambulance-depart "
-            "are only supported with --map skopje"
+            "are only supported with --map skopje or --map skopjelite"
         )
     if options.accident_duration <= 0:
         parser.error("--accident-duration must be greater than zero")
     if not 0 <= options.accident_probability <= 100:
         parser.error("--accident-probability must be between 0 and 100")
     if options.green_seconds <= 0 or options.red_seconds <= 0:
-        parser.error("--green-seconds and --red-seconds must be greater than zero")
+        parser.error(
+            "--green-seconds and --red-seconds must be greater than zero")
+    if not math.isfinite(options.replan_interval) or options.replan_interval <= 0:
+        parser.error(
+            "--replan-interval must be a finite value greater than zero")
+    if (options.traffic_light_penalty is not None
+            and (not math.isfinite(options.traffic_light_penalty)
+                 or options.traffic_light_penalty < 0)):
+        parser.error("--traffic-light-penalty must be finite and non-negative")
+    if (not math.isfinite(options.astar_heuristic_weight)
+            or options.astar_heuristic_weight < 0):
+        parser.error(
+            "--astar-heuristic-weight must be finite and non-negative")
+    if options.compare_time and options.map == "centar":
+        parser.error("--compare-time requires --map skopje or --map skopjelite")
+    if options.compare_time and options.gui:
+        parser.error("--compare-time runs headless for a meaningful timing comparison")
     return options
+
+
+def read_ambulance_trip_time(
+    tripinfo_file: Path,
+    max_trip_time: float,
+) -> str:
+    with tripinfo_file.open("rb") as tripinfo:
+        for _, vehicle_trip in ET.iterparse(tripinfo, events=("end",)):
+            if (
+                vehicle_trip.tag == "tripinfo"
+                and vehicle_trip.get("id") == "amb0"
+            ):
+                duration = vehicle_trip.get("duration")
+                if duration is None:
+                    return "Unavailable"
+                return f"{float(duration):.1f} s"
+    return f"Not completed ({max_trip_time:g} s limit)"
+
+
+def run_map_time_comparison(options: argparse.Namespace) -> None:
+    base_dir = Path(__file__).resolve().parent
+    map_dir = base_dir.parent / "skopje"
+    comparison_dir = Path(options.output_dir)
+    if not comparison_dir.is_absolute():
+        comparison_dir = map_dir / comparison_dir
+    comparison_dir.mkdir(parents=True, exist_ok=True)
+
+    original_args = sys.argv[1:]
+    child_args = []
+    index = 0
+    while index < len(original_args):
+        argument = original_args[index]
+        if argument in ("--map", "--output-dir"):
+            index += 2
+            continue
+        if argument.startswith("--map=") or argument.startswith("--output-dir="):
+            index += 1
+            continue
+        if argument == "--compare-time":
+            index += 1
+            continue
+        child_args.append(argument)
+        index += 1
+
+    elapsed_by_map = {}
+    for map_name in ("skopje", "skopjelite"):
+        print(f"\nRunning the same scenario on {map_name}...")
+        run_started = time.perf_counter()
+        subprocess.run(
+            [
+                sys.executable,
+                str(Path(__file__).resolve()),
+                *child_args,
+                "--map",
+                map_name,
+                "--output-dir",
+                str(comparison_dir / map_name),
+            ],
+            check=True,
+        )
+        elapsed_by_map[map_name] = time.perf_counter() - run_started
+
+    max_trip_time = options.duration - options.ambulance_depart
+    ambulance_trip_times = {
+        map_name: read_ambulance_trip_time(
+            comparison_dir / map_name / "tripinfo.xml",
+            max_trip_time,
+        )
+        for map_name in ("skopje", "skopjelite")
+    }
+
+    from route_pdf import write_runtime_comparison_pdf
+
+    report_path = write_runtime_comparison_pdf(
+        comparison_dir / "runtime-comparison.pdf",
+        elapsed_by_map,
+        ambulance_trip_times,
+        {
+            "Passenger vehicles": str(options.vehicles),
+            "Simulation duration": f"{options.duration:g} s",
+            "Seed": str(options.seed),
+        },
+    )
+    saved_seconds = elapsed_by_map["skopje"] - elapsed_by_map["skopjelite"]
+    saved_percent = saved_seconds / elapsed_by_map["skopje"] * 100
+    print(f"\nSkopje wall time: {elapsed_by_map['skopje']:.2f} s")
+    print(f"Skopje Lite wall time: {elapsed_by_map['skopjelite']:.2f} s")
+    print(f"Time saved: {saved_seconds:.2f} s ({saved_percent:.1f}%)")
+    print(f"Comparison PDF: {report_path.resolve()}")
 
 
 def main() -> None:
     options = parse_args()
+    if options.compare_time:
+        run_map_time_comparison(options)
+        return
+
     base_dir = Path(__file__).resolve().parent
     map_dir = base_dir if options.map == "centar" else base_dir.parent / "skopje"
     output_dir = Path(options.output_dir)
@@ -393,12 +532,13 @@ def main() -> None:
         else output_dir / "ambulance.rou.xml"
     )
     tripinfo_file = output_dir / "tripinfo.xml"
-    network_file = map_dir / (
-        "net.net.xml" if options.map == "centar" else "net.net.xml.gz"
-    )
-    config_file = map_dir / (
-        "run.sumocfg" if options.map == "centar" else "skopje.sumocfg"
-    )
+    network_name, config_name = {
+        "centar": ("net.net.xml", "run.sumocfg"),
+        "skopje": ("net.net.xml.gz", "skopje.sumocfg"),
+        "skopjelite": ("skopjelite.net.xml", "skopjelite.sumocfg"),
+    }[options.map]
+    network_file = map_dir / network_name
+    config_file = map_dir / config_name
     random_trips = tools_dir / "randomTrips.py"
     period = options.duration / options.vehicles
 
@@ -422,7 +562,8 @@ def main() -> None:
             f"SUMO generated {generated_count} vehicles; requested {options.vehicles}."
         )
 
-    if options.map == "skopje":
+    source_id = destination_id = None
+    if options.map != "centar":
         source_id, destination_id, route_length = generate_ambulance_route(
             network_file,
             ambulance_file,
@@ -457,6 +598,46 @@ def main() -> None:
     else:
         print("Scenario blockage: none.")
 
+    preemption_enabled = (
+        options.preempt or not options.no_preempt and not options.gui
+    )
+    if options.map != "centar":
+        start_request = (
+            f"{options.ambulance_from_coordinates[0]:g}, "
+            f"{options.ambulance_from_coordinates[1]:g} (lat, lon)"
+            if options.ambulance_from_coordinates is not None
+            else options.ambulance_from or "random"
+        )
+        destination_request = (
+            f"{options.ambulance_to_coordinates[0]:g}, "
+            f"{options.ambulance_to_coordinates[1]:g} (lat, lon)"
+            if options.ambulance_to_coordinates is not None
+            else options.ambulance_to or "random"
+        )
+    else:
+        start_request = destination_request = "preconfigured route"
+    scenario_parameters = {
+        "Map": options.map.title(),
+        "Run mode": "GUI" if options.gui else "Headless",
+        "Passenger vehicles": str(options.vehicles),
+        "Duration": f"{options.duration:g} s",
+        "Seed": str(options.seed),
+        "Ambulance departure": f"{options.ambulance_depart:g} s",
+        "Start input": start_request,
+        "Destination input": destination_request,
+        "Start edge": source_id or "preconfigured",
+        "Destination edge": (
+            destination_id or "preconfigured"
+        ),
+        "Blockage probability": f"{options.accident_probability:g}%",
+        "Blockage duration": f"{options.accident_duration:g} s",
+        "Blockage inserted": accident_id or "none",
+        "Signal priority": "enabled" if preemption_enabled else "disabled",
+        "Green cycle setting": f"{options.green_seconds:g} s",
+        "Red cycle setting": f"{options.red_seconds:g} s",
+        "Output directory": str(options.output_dir),
+    }
+
     command = [
         sys.executable, str(base_dir / "control.py"),
         "--config-file", str(config_file),
@@ -466,10 +647,19 @@ def main() -> None:
         "--tripinfo-output", str(tripinfo_file),
         "--route-pdf", str(output_dir / "ambulance-route.pdf"),
         "--map-name", options.map.title(),
+        "--search-algorithm", options.search_algorithm,
+        "--replan-interval", str(options.replan_interval),
+        "--astar-heuristic-weight", str(options.astar_heuristic_weight),
+        "--scenario-parameters", json.dumps(scenario_parameters),
         "--end-time", str(options.duration),
         "--green-seconds", str(options.green_seconds),
         "--red-seconds", str(options.red_seconds),
     ]
+    if options.traffic_light_penalty is not None:
+        command.extend([
+            "--traffic-light-penalty",
+            str(options.traffic_light_penalty),
+        ])
     if options.gui:
         command.append("--gui")
     if options.preempt:
@@ -477,7 +667,8 @@ def main() -> None:
     elif options.no_preempt:
         command.append("--no-preempt")
 
-    print(f"Generated {generated_count} passenger vehicles (seed {options.seed}).")
+    print(
+        f"Generated {generated_count} passenger vehicles (seed {options.seed}).")
     print(f"Scenario files: {output_dir}")
     subprocess.run(command, cwd=map_dir, env=child_env, check=True)
 

@@ -1,0 +1,5 @@
+<configuration>
+  <input>
+    <net-file value="skopjelite.net.xml"/>
+  </input>
+</configuration>

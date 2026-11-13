@@ -35,18 +35,18 @@ The scenario script searches common system locations and SUMO's Python package
 location for the SUMO tools. If it cannot find them, set `SUMO_HOME` to your
 SUMO installation directory (the directory containing `tools/`).
 
-Create a Python environment and install the project dependency:
+Create a Python environment and install the project dependencies:
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
+python -m venv venv
+source venv/bin/activate
 python -m pip install -r requirements.txt
 ```
 
 On Windows, activate the environment with:
 
 ```powershell
-.venv\Scripts\Activate.ps1
+venv\Scripts\Activate.ps1
 ```
 
 If SUMO is installed outside the locations searched by the scenario script,
@@ -72,6 +72,26 @@ Run the larger Skopje scenario:
 python centar/scenario.py --map skopje --gui
 ```
 
+To run the editable copy `skopje/skopjelite.net.xml`:
+
+```bash
+python centar/scenario.py --map skopjelite --gui
+```
+
+Compare the whole-run time on both networks using identical scenario settings
+and a fixed seed. This runs headlessly and writes a timing table to
+`skopje/scenario-output/runtime-comparison.pdf`. The table includes whole-run
+wall time, ambulance trip duration in simulation seconds, the time saved, and
+the report creation date/time:
+
+```bash
+python centar/scenario.py --map skopjelite --compare-time \
+  --vehicles 100 --duration 900 \
+  --ambulance-from-coordinates 41.976343 21.549497 \
+  --ambulance-to-coordinates 42.006512 21.402385 \
+  --ambulance-depart 120 --accident-probability 0 --seed 10
+```
+
 For a headless run, omit `--gui`:
 
 ```bash
@@ -87,7 +107,7 @@ time.
 ### Common options
 
 ```text
---map {centar,skopje}             Road network (default: centar)
+--map {centar,skopje,skopjelite}  Road network (default: centar)
 --vehicles N                      Number of passenger vehicles (default: 1200)
 --duration SECONDS                Traffic generation and simulation limit (default: 1800)
 --ambulance-from EDGE_ID          Skopje ambulance start edge (default: random)
@@ -145,6 +165,24 @@ the remaining time is distributed among the program's green phases. These
 values do not independently force every signal's red and green portions to
 match exactly.
 
+### Route search settings
+
+The ambulance route uses weighted Dijkstra by default, minimizing estimated
+travel time. Select `--search-algorithm astar` to use A* with a straight-line
+travel-time heuristic. `--astar-heuristic-weight` defaults to `1`; values
+above `1` may find a route faster but can sacrifice optimality. Tune how often
+the route is recalculated with `--replan-interval` (seconds). Adjust the
+per-traffic-light cost with `--traffic-light-penalty` (seconds); if omitted,
+the default is `0` with priority enabled and `15` otherwise.
+
+For example:
+
+```bash
+python centar/scenario.py --map skopje --search-algorithm astar \
+  --astar-heuristic-weight 1.2 --replan-interval 15 \
+  --traffic-light-penalty 5 --gui
+```
+
 The blockage setting adds at most one stopped passenger vehicle to the
 generated routes when the seeded probability check succeeds. It is a simple
 temporary blockage, not a detailed collision or damage model.
@@ -179,10 +217,16 @@ Scenario files are written under the selected map directory:
 
 Each run generates passenger trips and validated routes. Skopje runs also
 generate an ambulance route. Runs where the ambulance travels also create
-`ambulance-route.pdf`, showing the city road network and the roads actually
-traversed by the ambulance in red. The SUMO trip-information output records
-vehicle departure, arrival, and travel-time information. Generated scenario
-folders are ignored by Git.
+`ambulance-route-N.pdf` (with an incrementing number), showing the city road
+network and the roads actually traversed by the ambulance in red. The
+lower-right table lists the scenario settings and route-search parameters and
+is limited to 16% of the PDF page height. It also reports simulation wall
+time for the controller loop, measured ambulance trip duration in SUMO
+simulation seconds, and the Dijkstra-optimal ETA estimate from the initial
+route calculation. If the ambulance does not arrive before the simulation
+ends, the measured trip row reports elapsed time and marks it incomplete. The
+SUMO trip-information output records vehicle departure, arrival, and
+travel-time information. Generated scenario folders are ignored by Git.
 
 ## Repository layout
 
