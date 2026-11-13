@@ -1,9 +1,11 @@
 import argparse
 import copy
+from pathlib import Path
 import time
 import traci
 import sumolib
 import networkx as nx
+from route_pdf import write_route_pdf
 
 # GUI runs use normal signal cycles by default; --preempt opts in to ambulance priority.
 parser = argparse.ArgumentParser(
@@ -19,6 +21,8 @@ parser.add_argument("--ambulance-route", default="amb.rou.xml")
 parser.add_argument("--config-file", default="run.sumocfg")
 parser.add_argument("--network-file", default="net.net.xml")
 parser.add_argument("--tripinfo-output")
+parser.add_argument("--route-pdf", default="ambulance-route.pdf")
+parser.add_argument("--map-name")
 parser.add_argument("--end-time", type=float)
 parser.add_argument(
     "--green-seconds", type=float, default=25,
@@ -58,7 +62,10 @@ traci.start(["sumo-gui" if GUI else "sumo"] + args)
 # The routing graph uses road edges as nodes. A graph link means SUMO allows
 # the ambulance to drive directly from one road edge to the next.
 net = sumolib.net.readNet(options.network_file)
-EDGES = {e.getID(): e for e in net.getEdges() if e.allows("emergency")}
+ALL_EDGES = {e.getID(): e for e in net.getEdges()}
+EDGES = {eid: edge for eid, edge in ALL_EDGES.items()
+         if edge.allows("emergency")}
+MAP_NAME = options.map_name or Path.cwd().name.title() or "City network"
 
 
 def weight(eid):
@@ -152,19 +159,26 @@ def run_once():
         set_normal_signal_cycles(GREEN_SECONDS, RED_SECONDS)
     t0 = dst = None
     last_plan, tracking = -1e9, False
+    traversed_edges = []
     # Advance SUMO one step at a time so routes and signals can be adjusted live.
     while (traci.simulation.getMinExpectedNumber() > 0
            and (options.end_time is None
                 or traci.simulation.getTime() < options.end_time)):
         traci.simulationStep()
         t = traci.simulation.getTime()
+        if AMB in traci.vehicle.getIDList():
+            road_id = traci.vehicle.getRoadID(AMB)
+            if road_id in EDGES and (
+                not traversed_edges or traversed_edges[-1] != road_id
+            ):
+                traversed_edges.append(road_id)
         if GUI and t >= 295:
             time.sleep(0.1)
 
         if AMB in traci.simulation.getArrivedIDList():
             print(f"{AMB}: duration = {t - t0:.0f} s  [{tag}]")
             if options.end_time is None:
-                return
+                break
         if AMB not in traci.vehicle.getIDList():
             continue
         if traci.vehicle.getSpeed(AMB) < 0.5 and int(t) % 10 == 0:
@@ -203,6 +217,12 @@ def run_once():
 
         if PREEMPT:
             preempt(t)
+
+    if traversed_edges:
+        write_route_pdf(net, traversed_edges, Path(options.route_pdf), MAP_NAME)
+        print(f"Ambulance route PDF: {Path(options.route_pdf).resolve()}")
+    else:
+        print("No ambulance road segments were recorded; route PDF not created.")
 
 
 while True:

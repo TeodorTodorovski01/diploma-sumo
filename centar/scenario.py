@@ -464,6 +464,8 @@ def main() -> None:
         "--ambulance-route", str(ambulance_file),
         "--passenger-routes", str(routes_file),
         "--tripinfo-output", str(tripinfo_file),
+        "--route-pdf", str(output_dir / "ambulance-route.pdf"),
+        "--map-name", options.map.title(),
         "--end-time", str(options.duration),
         "--green-seconds", str(options.green_seconds),
         "--red-seconds", str(options.red_seconds),

@@ -19,13 +19,15 @@ the original central-area network and a larger urban Skopje network.
 - Optionally add one stopped passenger vehicle to simulate a temporary
   road blockage.
 - Save generated routes and trip information for each scenario.
+- Export a PDF map with the ambulance's actually traversed roads highlighted
+  in red.
 
 ## Requirements
 
 - Python 3.10 or later.
 - SUMO and its tools, including `randomTrips.py` and `sumolib`.
 - SUMO-GUI (`sumo-gui`) to view simulations graphically.
-- Python package `networkx`.
+- Python packages `matplotlib` and `networkx`.
 
 Install SUMO using the instructions for your operating system in the
 [official SUMO documentation](https://sumo.dlr.de/docs/Installing/index.html).
@@ -38,7 +40,7 @@ Create a Python environment and install the project dependency:
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-python -m pip install networkx
+python -m pip install -r requirements.txt
 ```
 
 On Windows, activate the environment with:
@@ -90,7 +92,14 @@ time.
 --duration SECONDS                Traffic generation and simulation limit (default: 1800)
 --ambulance-from EDGE_ID          Skopje ambulance start edge (default: random)
 --ambulance-to EDGE_ID            Skopje ambulance destination edge (default: random)
---ambulance-from-coordinates LAT LON   Skopje start latitude and longitude
+source venv/bin/activate
+export SUMO_HOME="$PWD/venv/lib64/python3.15/site-packages/sumo"
+python centar/scenario.py --map skopje --gui \
+  --ambulance-from-coordinates 41.976343 21.549497 \
+  --ambulance-to-coordinates 42.006512 21.402385 \
+  --ambulance-depart 0 \
+  --duration 1800 \
+  --accident-probability 0--ambulance-from-coordinates LAT LON   Skopje start latitude and longitude
 --ambulance-to-coordinates LAT LON     Skopje destination latitude and longitude
 --ambulance-depart SECONDS        Skopje ambulance departure time (default: 300)
 --accident-probability PERCENT    Chance of one blockage, from 0 to 100 (default: 20)
@@ -169,9 +178,11 @@ Scenario files are written under the selected map directory:
 - Skopje scenarios: `skopje/scenario-output/`
 
 Each run generates passenger trips and validated routes. Skopje runs also
-generate an ambulance route. The SUMO trip-information output records vehicle
-departure, arrival, and travel-time information. Generated scenario folders
-are ignored by Git.
+generate an ambulance route. Runs where the ambulance travels also create
+`ambulance-route.pdf`, showing the city road network and the roads actually
+traversed by the ambulance in red. The SUMO trip-information output records
+vehicle departure, arrival, and travel-time information. Generated scenario
+folders are ignored by Git.
 
 ## Repository layout
 
