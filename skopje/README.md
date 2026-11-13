@@ -40,6 +40,27 @@ blockages:
 python scenario.py --map skopje --gui --vehicles 1200 --accident-probability 0
 ```
 
+To start the ambulance at specific map coordinates, enter each location as
+latitude followed by longitude. From the repository root, run:
+
+```bash
+source venv/bin/activate
+export SUMO_HOME="$PWD/venv/lib64/python3.15/site-packages/sumo"
+python centar/scenario.py --map skopje --gui \
+  --ambulance-from-coordinates 41.976343 21.549497 \
+  --ambulance-to-coordinates 42.006512 21.402385 \
+  --ambulance-depart 0 \
+  --duration 1800 \
+  --accident-probability 0
+```
+
+The generator picks nearby emergency-accessible roads that have a connecting
+route; coordinate searches include roads up to 250 meters away. Alternatively,
+use `--ambulance-from EDGE_ID` and `--ambulance-to EDGE_ID` to enter edge IDs
+directly. If you omit both start and destination options, it chooses a long
+random route. The generated route is saved in
+`skopje/scenario-output/ambulance.rou.xml`.
+
 ## Data attribution
 
 Map data © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright),

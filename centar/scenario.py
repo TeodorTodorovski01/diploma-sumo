@@ -135,33 +135,102 @@ def generate_ambulance_route(
     route_file: Path,
     seed: int,
     depart: float = 300,
+    source_id: str | None = None,
+    destination_id: str | None = None,
+    source_coordinates: tuple[float, float] | None = None,
+    destination_coordinates: tuple[float, float] | None = None,
 ) -> tuple[str, str, int]:
     import sumolib
 
     net = sumolib.net.readNet(str(network_file))
-    edges = [
-        edge for edge in net.getEdges()
-        if edge.allows("emergency") and edge.getLength() >= 100
-    ]
-    if len(edges) < 2:
-        raise RuntimeError(f"Not enough emergency-accessible roads in {network_file}")
+    if source_id is not None and destination_id is not None:
+        try:
+            source = net.getEdge(source_id)
+            destination = net.getEdge(destination_id)
+        except KeyError as error:
+            raise RuntimeError(
+                f"Ambulance edge {error.args[0]!r} does not exist in {network_file}"
+            ) from error
+        for edge_id, edge in ((source_id, source), (destination_id, destination)):
+            if not edge.allows("emergency"):
+                raise RuntimeError(
+                    f"Ambulance edge {edge_id!r} is not accessible to emergency vehicles"
+                )
+        path, _ = net.getShortestPath(source, destination, vClass="emergency")
+        if not path:
+            raise RuntimeError(
+                f"No emergency-vehicle route connects {source_id!r} to "
+                f"{destination_id!r} in {network_file}"
+            )
+    elif source_coordinates is not None and destination_coordinates is not None:
+        def nearby_edges(coordinates: tuple[float, float]):
+            latitude, longitude = coordinates
+            x, y = net.convertLonLat2XY(longitude, latitude)
+            return sorted(
+                (
+                    (distance, edge)
+                    for edge, distance in net.getNeighboringEdges(x, y, 250)
+                    if edge.allows("emergency")
+                ),
+                key=lambda item: item[0],
+            )
 
-    rng = random.Random(seed)
-    selected_path = None
-    for _ in range(500):
-        source, destination = rng.sample(edges, 2)
-        path, length = net.getShortestPath(
-            source, destination, vClass="emergency"
-        )
-        if path and len(path) >= 30 and length >= 8_000:
-            selected_path = source.getID(), destination.getID(), path
-            break
-    if selected_path is None:
-        raise RuntimeError(
-            f"Could not find a long, connected emergency-vehicle route in {network_file}"
-        )
+        source_candidates = nearby_edges(source_coordinates)
+        destination_candidates = nearby_edges(destination_coordinates)
+        if not source_candidates or not destination_candidates:
+            raise RuntimeError(
+                "Could not find an emergency-accessible road within 250 meters "
+                "of both ambulance coordinates"
+            )
 
-    source_id, destination_id, path = selected_path
+        candidate_pairs = [
+            (source_distance + destination_distance, source_distance,
+             destination_distance, source, destination)
+            for source_distance, source in source_candidates
+            for destination_distance, destination in destination_candidates
+        ]
+        candidate_pairs.sort(key=lambda candidate: candidate[0])
+        selected_path = None
+        for _, _, _, source, destination in candidate_pairs:
+            path, _ = net.getShortestPath(
+                source, destination, vClass="emergency"
+            )
+            if path:
+                selected_path = source, destination, path
+                break
+        if selected_path is None:
+            raise RuntimeError(
+                "No emergency-vehicle route connects roads near the specified "
+                "ambulance coordinates"
+            )
+        source, destination, path = selected_path
+        source_id, destination_id = source.getID(), destination.getID()
+    else:
+        edges = [
+            edge for edge in net.getEdges()
+            if edge.allows("emergency") and edge.getLength() >= 100
+        ]
+        if len(edges) < 2:
+            raise RuntimeError(
+                f"Not enough emergency-accessible roads in {network_file}"
+            )
+
+        rng = random.Random(seed)
+        selected_path = None
+        for _ in range(500):
+            source, destination = rng.sample(edges, 2)
+            path, length = net.getShortestPath(
+                source, destination, vClass="emergency"
+            )
+            if path and len(path) >= 30 and length >= 8_000:
+                selected_path = source.getID(), destination.getID(), path
+                break
+        if selected_path is None:
+            raise RuntimeError(
+                f"Could not find a long, connected emergency-vehicle route in {network_file}"
+            )
+
+        source_id, destination_id, path = selected_path
     routes = ET.Element("routes")
     ET.SubElement(routes, "vType", {
         "id": "amb",
@@ -198,6 +267,32 @@ def parse_args() -> argparse.Namespace:
                         help="number of passenger vehicles to generate (default: 1200)")
     parser.add_argument("--duration", type=float, default=1800,
                         help="traffic generation and maximum simulation time in seconds (default: 1800)")
+    parser.add_argument(
+        "--ambulance-from",
+        help="Skopje network edge ID where the ambulance starts (default: random)",
+    )
+    parser.add_argument(
+        "--ambulance-to",
+        help="Skopje network edge ID where the ambulance ends (default: random)",
+    )
+    parser.add_argument(
+        "--ambulance-from-coordinates",
+        nargs=2,
+        type=float,
+        metavar=("LAT", "LON"),
+        help="Skopje ambulance start coordinates in latitude, longitude order",
+    )
+    parser.add_argument(
+        "--ambulance-to-coordinates",
+        nargs=2,
+        type=float,
+        metavar=("LAT", "LON"),
+        help="Skopje ambulance destination coordinates in latitude, longitude order",
+    )
+    parser.add_argument(
+        "--ambulance-depart", type=float, default=300,
+        help="ambulance departure time in seconds (default: 300)",
+    )
     parser.add_argument("--accident-probability", type=float, default=20,
                         help="chance from 0 to 100%% of one stopped-vehicle blockage (default: 20)")
     parser.add_argument("--accident-duration", type=float, default=60,
@@ -225,8 +320,39 @@ def parse_args() -> argparse.Namespace:
 
     if options.vehicles <= 0:
         parser.error("--vehicles must be greater than zero")
-    if options.duration <= 300:
-        parser.error("--duration must exceed the ambulance's 300-second departure time")
+    if options.ambulance_depart < 0:
+        parser.error("--ambulance-depart must be zero or greater")
+    if options.duration <= options.ambulance_depart:
+        parser.error("--duration must exceed --ambulance-depart")
+    edge_options_set = (
+        options.ambulance_from is not None or options.ambulance_to is not None
+    )
+    coordinate_options_set = (
+        options.ambulance_from_coordinates is not None
+        or options.ambulance_to_coordinates is not None
+    )
+    if (options.ambulance_from is None) != (options.ambulance_to is None):
+        parser.error("--ambulance-from and --ambulance-to must be provided together")
+    if (
+        options.ambulance_from_coordinates is None
+    ) != (
+        options.ambulance_to_coordinates is None
+    ):
+        parser.error(
+            "--ambulance-from-coordinates and --ambulance-to-coordinates "
+            "must be provided together"
+        )
+    if edge_options_set and coordinate_options_set:
+        parser.error(
+            "Use either ambulance edge IDs or coordinate pairs, not both"
+        )
+    if options.map != "skopje" and (
+        edge_options_set or coordinate_options_set or options.ambulance_depart != 300
+    ):
+        parser.error(
+            "Ambulance start/destination options and --ambulance-depart "
+            "are only supported with --map skopje"
+        )
     if options.accident_duration <= 0:
         parser.error("--accident-duration must be greater than zero")
     if not 0 <= options.accident_probability <= 100:
@@ -298,7 +424,20 @@ def main() -> None:
 
     if options.map == "skopje":
         source_id, destination_id, route_length = generate_ambulance_route(
-            network_file, ambulance_file, options.seed + 2
+            network_file,
+            ambulance_file,
+            options.seed + 2,
+            depart=options.ambulance_depart,
+            source_id=options.ambulance_from,
+            destination_id=options.ambulance_to,
+            source_coordinates=(
+                tuple(options.ambulance_from_coordinates)
+                if options.ambulance_from_coordinates is not None else None
+            ),
+            destination_coordinates=(
+                tuple(options.ambulance_to_coordinates)
+                if options.ambulance_to_coordinates is not None else None
+            ),
         )
         print(
             f"Skopje ambulance route: {source_id} -> {destination_id} "

@@ -78,8 +78,9 @@ python centar/scenario.py --map skopje
 
 The scenario generator defaults to 1,200 passenger vehicles over 1,800
 simulation seconds, a 20% chance of one 60-second blockage, seed `1`, and a
-nominal 25+25-second signal cycle. The ambulance departs at 300 seconds. The
-simulation duration must be greater than 300 seconds.
+nominal 25+25-second signal cycle. By default, the ambulance departs at 300
+seconds. The simulation duration must be greater than the ambulance departure
+time.
 
 ### Common options
 
@@ -87,6 +88,11 @@ simulation duration must be greater than 300 seconds.
 --map {centar,skopje}             Road network (default: centar)
 --vehicles N                      Number of passenger vehicles (default: 1200)
 --duration SECONDS                Traffic generation and simulation limit (default: 1800)
+--ambulance-from EDGE_ID          Skopje ambulance start edge (default: random)
+--ambulance-to EDGE_ID            Skopje ambulance destination edge (default: random)
+--ambulance-from-coordinates LAT LON   Skopje start latitude and longitude
+--ambulance-to-coordinates LAT LON     Skopje destination latitude and longitude
+--ambulance-depart SECONDS        Skopje ambulance departure time (default: 300)
 --accident-probability PERCENT    Chance of one blockage, from 0 to 100 (default: 20)
 --accident-duration SECONDS       Blockage duration (default: 60)
 --seed N                          Random seed (default: 1)
@@ -106,9 +112,19 @@ python centar/scenario.py \
   --gui \
   --vehicles 100 \
   --duration 900 \
+  --ambulance-from-coordinates 41.976343 21.549497 \
+  --ambulance-to-coordinates 42.006512 21.402385 \
+  --ambulance-depart 120 \
   --accident-probability 0 \
   --seed 10
 ```
+
+Coordinates are entered as two values in latitude then longitude order. The
+generator selects nearby emergency-accessible roads that have a connecting
+route. Alternatively, use `--ambulance-from EDGE_ID` and `--ambulance-to
+EDGE_ID` to specify road edge IDs directly. Omit both pairs to generate a long
+random route. The simulation duration must be greater than the ambulance
+departure time.
 
 To make the ambulance receive signal priority in GUI mode, add `--preempt`.
 Headless runs enable priority by default; use `--no-preempt` to disable it.
