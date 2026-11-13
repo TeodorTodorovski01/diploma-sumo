@@ -17,6 +17,8 @@ import time
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+from search_defaults import load_search_defaults
+
 
 def find_sumo_tools() -> Path:
     candidates: list[Path] = []
@@ -262,6 +264,14 @@ def generate_ambulance_route(
 
 
 def parse_args() -> argparse.Namespace:
+    search_defaults = load_search_defaults()
+    penalty_help = (
+        "extra route cost in seconds per traffic light "
+        f"(default: {search_defaults.traffic_light_penalty:g})"
+        if search_defaults.traffic_light_penalty is not None
+        else "extra route cost in seconds per traffic light "
+        "(default: 0 with priority, otherwise 15)"
+    )
     parser = argparse.ArgumentParser(
         description="Generate passenger traffic and run a configurable SUMO scenario."
     )
@@ -316,20 +326,31 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--search-algorithm",
         choices=("dijkstra", "astar"),
-        default="dijkstra",
-        help="route search algorithm (default: dijkstra)",
+        default=search_defaults.search_algorithm,
+        help=(
+            "route search algorithm "
+            f"(default: {search_defaults.search_algorithm})"
+        ),
     )
     parser.add_argument(
-        "--replan-interval", type=float, default=30,
-        help="recompute the ambulance route every N seconds (default: 30)",
+        "--replan-interval", type=float, default=search_defaults.replan_interval,
+        help=(
+            "recompute the ambulance route every N seconds "
+            f"(default: {search_defaults.replan_interval:g})"
+        ),
     )
     parser.add_argument(
         "--traffic-light-penalty", type=float,
-        help="extra route cost in seconds per traffic light (default: 0 with priority, otherwise 15)",
+        default=search_defaults.traffic_light_penalty,
+        help=penalty_help,
     )
     parser.add_argument(
-        "--astar-heuristic-weight", type=float, default=1.0,
-        help="A* heuristic multiplier; values above 1 may trade optimality for speed (default: 1)",
+        "--astar-heuristic-weight", type=float,
+        default=search_defaults.astar_heuristic_weight,
+        help=(
+            "A* heuristic multiplier; values above 1 may trade optimality "
+            f"for speed (default: {search_defaults.astar_heuristic_weight:g})"
+        ),
     )
     parser.add_argument("--output-dir", default="scenario-output",
                         help="directory for generated scenario files")

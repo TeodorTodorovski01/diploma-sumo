@@ -167,12 +167,14 @@ match exactly.
 
 ### Route search settings
 
-The ambulance route uses weighted Dijkstra by default, minimizing estimated
-travel time. Select `--search-algorithm astar` to use A* with a straight-line
+The checked-in defaults use weighted Dijkstra, minimizing estimated travel
+time. The algorithm and numeric settings are read from
+[`centar/search_defaults.json`](centar/search_defaults.json), which training
+can update. Select `--search-algorithm astar` to use A* with a straight-line
 travel-time heuristic. `--astar-heuristic-weight` defaults to `1`; values
 above `1` may find a route faster but can sacrifice optimality. Tune how often
 the route is recalculated with `--replan-interval` (seconds). Adjust the
-per-traffic-light cost with `--traffic-light-penalty` (seconds); if omitted,
+per-traffic-light cost with `--traffic-light-penalty` (seconds); if unset,
 the default is `0` with priority enabled and `15` otherwise.
 
 For example:
@@ -182,6 +184,49 @@ python centar/scenario.py --map skopje --search-algorithm astar \
   --astar-heuristic-weight 1.2 --replan-interval 15 \
   --traffic-light-penalty 5 --gui
 ```
+
+### Tune search defaults
+
+`centar/training.py` uses simultaneous perturbation stochastic approximation
+(SPSA), a finite-difference gradient method, to minimize the ambulance's
+measured trip duration on Skopje Lite. SUMO routing is discrete and
+non-differentiable, so this is an approximate gradient rather than
+backpropagation. It tunes the replan interval and traffic-light penalty, plus
+the A* heuristic weight when training A*. It uses a fixed seed and disables
+simulated blockages to make parameter comparisons more repeatable.
+
+Run a short training session:
+
+```bash
+python centar/training.py --search-algorithm astar \
+  --iterations 3 --alpha 0.05 --vehicles 100 --duration 900 --seed 10
+```
+
+Training runs a baseline, two perturbed scenarios per iteration, and a final
+scenario, so the default three iterations require eight SUMO runs.
+`--alpha` (aliases `--learning-rate` and `--a`) is the gradient step size.
+Because SUMO's routing objective is not differentiable, SPSA estimates the
+gradient using perturbations. Their size and decay are optional controls:
+`--perturbation`/`--c` (default `0.1`), `--alpha-exponent` (default `0.602`),
+and `--gamma` (default `0.101`). You only need to set `--alpha` for a basic
+run; the PDF report records all optimizer settings.
+
+When at least one ambulance trip completes, the best observed parameters
+automatically update [`centar/search_defaults.json`](centar/search_defaults.json).
+Both the scenario runner and direct controller read that file on their next
+launch; there is no manual copy step. If no trip completes, or if you pass
+`--no-apply`, defaults remain unchanged.
+
+Training writes `training-report.pdf` (objective graph and before/after
+parameter table), `training-results.csv` (one row per evaluation), and
+`training-results.json` under `skopje/scenario-output/training/`. The report
+states whether defaults were applied. A profile-specific
+`training-best-<id>.json` also remembers the best completed ambulance trip and
+its parameters across runs. Repeated runs with the same algorithm, seed,
+vehicle count, duration, route, and Skopje Lite network resume from and compare
+against that best. Different scenarios use separate best records and are not
+compared. After training on Skopje Lite, validate the learned settings on the
+full Skopje network.
 
 The blockage setting adds at most one stopped passenger vehicle to the
 generated routes when the seeded probability check succeeds. It is a simple
@@ -234,6 +279,9 @@ travel-time information. Generated scenario folders are ignored by Git.
 centar/
   control.py       SUMO/TraCI simulation controller
   scenario.py      Configurable route generation and scenario launcher
+  training.py     Search-parameter training on Skopje Lite
+  search_defaults.json
+                   Defaults shared by the scenario runner and controller
   run.sumocfg      Central-area SUMO configuration
   net.net.xml      Central-area SUMO road network
   amb.rou.xml      Preconfigured central-area ambulance trip

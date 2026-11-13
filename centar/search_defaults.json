@@ -1,0 +1,6 @@
+{
+  "search_algorithm": "dijkstra",
+  "replan_interval": 30.0,
+  "traffic_light_penalty": 0.0,
+  "astar_heuristic_weight": 1.0
+}

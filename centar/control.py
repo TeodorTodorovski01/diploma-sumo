@@ -8,8 +8,10 @@ import traci
 import sumolib
 import networkx as nx
 from route_pdf import write_route_pdf
+from search_defaults import load_search_defaults
 
 # GUI runs use normal signal cycles by default; --preempt opts in to ambulance priority.
+search_defaults = load_search_defaults()
 parser = argparse.ArgumentParser(
     description="Run the ambulance SUMO simulation."
 )
@@ -28,11 +30,18 @@ parser.add_argument("--map-name")
 parser.add_argument(
     "--search-algorithm",
     choices=("dijkstra", "astar"),
-    default="dijkstra",
+    default=search_defaults.search_algorithm,
 )
-parser.add_argument("--replan-interval", type=float, default=30)
-parser.add_argument("--traffic-light-penalty", type=float)
-parser.add_argument("--astar-heuristic-weight", type=float, default=1.0)
+parser.add_argument(
+    "--replan-interval", type=float, default=search_defaults.replan_interval)
+parser.add_argument(
+    "--traffic-light-penalty", type=float,
+    default=search_defaults.traffic_light_penalty,
+)
+parser.add_argument(
+    "--astar-heuristic-weight", type=float,
+    default=search_defaults.astar_heuristic_weight,
+)
 parser.add_argument("--scenario-parameters", type=json.loads, default={})
 parser.add_argument("--end-time", type=float)
 parser.add_argument(
